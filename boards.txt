@@ -143,3 +143,46 @@ Cricket-L082CZ.menu.opt.o2.build.flags.ldspecs=
 Cricket-L082CZ.menu.opt.o3=Fastest
 Cricket-L082CZ.menu.opt.o3.build.flags.optimize=-O3
 Cricket-L082CZ.menu.opt.o3.build.flags.ldspecs=
+
+# Tlera Grasshopper
+# ---------------------------------------
+Generic-STM32L051.name=Cricket-L082CZ
+
+Generic-STM32L051.upload.tool=stm32l0_dfu
+Generic-STM32L051.upload.protocol=dfu
+Generic-STM32L051.upload.maximum_size=196608
+Generic-STM32L051.upload.use_1200bps_touch=true
+Generic-STM32L051.upload.wait_for_upload_port=false
+Generic-STM32L051.upload.native_usb=false
+
+Generic-STM32L051.build.mcu=cortex-m0plus
+Generic-STM32L051.build.f_cpu=32000000L
+Generic-STM32L051.build.board=STM32L051_GENERIC
+Generic-STM32L051.build.arch=STM32L0
+Generic-STM32L051.build.core=arduino
+Generic-STM32L051.build.extra_flags=-DSTM32L051xx -march=armv6-m -mthumb -mabi=aapcs -mfloat-abi=soft -fsingle-precision-constant {build.usb_flags} {build.dosfs_flags}
+Generic-STM32L051.build.ldscript=linker_scripts/STM32L051_FLASH.ld
+Generic-STM32L051.build.openocdscript=openocd_scripts/stm32l051_generic.cfg
+Generic-STM32L051.build.variant=STM32L051-Generic
+Generic-STM32L051.build.variant_system_libs="-L{runtime.platform.path}/system/STM32L0xx/Lib" "-L{runtime.platform.path}/system/CMSIS/Lib" -lstm32l082 -larm_cortexM0l_math
+Generic-STM32L051.build.variant_system_include="-I{runtime.platform.path}/system/CMSIS/Include" "-I{runtime.platform.path}/system/CMSIS/Device/ST/STM32L0xx/Include" "-I{runtime.platform.path}/system/STM32L0xx/Include" 
+
+Generic-STM32L051.menu.speed.32=32 MHz
+Generic-STM32L051.menu.speed.32.build.f_cpu=32000000L
+Generic-STM32L051.menu.speed.16=16 MHz
+Generic-STM32L051.menu.speed.16.build.f_cpu=16000000L
+Generic-STM32L051.menu.speed.4=4.2 MHz
+Generic-STM32L051.menu.speed.4.build.f_cpu=4200000L
+
+Generic-STM32L051.menu.opt.os=Smallest Code
+Generic-STM32L051.menu.opt.os.build.flags.optimize=-Os
+Generic-STM32L051.menu.opt.os.build.flags.ldspecs=--specs=nano.specs
+Generic-STM32L051.menu.opt.o1=Fast
+Generic-STM32L051.menu.opt.o1.build.flags.optimize=-O1
+Generic-STM32L051.menu.opt.o1.build.flags.ldspecs=
+Generic-STM32L051.menu.opt.o2=Faster
+Generic-STM32L051.menu.opt.o2.build.flags.optimize=-O2
+Generic-STM32L051.menu.opt.o2.build.flags.ldspecs=
+Generic-STM32L051.menu.opt.o3=Fastest
+Generic-STM32L051.menu.opt.o3.build.flags.optimize=-O3
+Generic-STM32L051.menu.opt.o3.build.flags.ldspecs=
