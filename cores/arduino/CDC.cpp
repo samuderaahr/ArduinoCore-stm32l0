@@ -45,7 +45,7 @@ static int serialusb_stdio_put(char data, FILE *fp)
     return SerialUSB.write(&data, 1);
 }
 
-CDC::CDC(struct _stm32l0_usbd_cdc_t *usbd_cdc)
+CDC::CDC(struct _stm32l0_usbd_cdc_t *usbd_cdc, void (*serialEventRun)(void))
 {
     _usbd_cdc = usbd_cdc;
 
@@ -61,6 +61,10 @@ CDC::CDC(struct _stm32l0_usbd_cdc_t *usbd_cdc)
 
     _tx_data2 = NULL;
     _tx_size2 = 0;
+
+    if (serialEventRun) {
+	g_serialEventRun = serialEventRun;
+    }
 
     stm32l0_usbd_cdc_create(usbd_cdc);
 }
@@ -278,10 +282,10 @@ size_t CDC::write(const uint8_t *buffer, size_t size)
 
 bool CDC::write(const uint8_t *buffer, size_t size, void(*callback)(void))
 {
-    return write(buffer, size, Notifier(callback));
+    return write(buffer, size, Callback(callback));
 }
 
-bool CDC::write(const uint8_t *buffer, size_t size, Notifier notify)
+bool CDC::write(const uint8_t *buffer, size_t size, Callback callback)
 {
     if (!_enabled) {
 	return false;
@@ -295,7 +299,7 @@ bool CDC::write(const uint8_t *buffer, size_t size, Notifier notify)
 	return false;
     }
 
-    _completionNotify = notify;
+    _completionCallback = callback;
 
     _tx_data2 = buffer;
     _tx_size2 = size;
@@ -307,7 +311,7 @@ bool CDC::write(const uint8_t *buffer, size_t size, Notifier notify)
 	if (!stm32l0_usbd_cdc_transmit(_usbd_cdc, _tx_data2, _tx_size2, (stm32l0_usbd_cdc_done_callback_t)CDC::_doneCallback, (void*)this)) {
 	    _tx_busy = false;
 
-	    _completionNotify = Notifier();
+	    _completionCallback = Callback();
 
 	    _tx_data2 = NULL;
 	    _tx_size2 = 0;
@@ -326,12 +330,12 @@ void CDC::setNonBlocking(bool enabled)
 
 void CDC::onReceive(void(*callback)(void))
 {
-    _receiveNotify = Notifier(callback);
+    _receiveCallback = Callback(callback);
 }
 
-void CDC::onReceive(Notifier notify)
+void CDC::onReceive(Callback callback)
 {
-    _receiveNotify = notify;
+    _receiveCallback = callback;
 }
 
 CDC::operator bool()
@@ -371,8 +375,8 @@ bool CDC::rts()
 
 void CDC::_eventCallback(class CDC *self, uint32_t events)
 {
-    if (events & USBD_CDC_EVENT_RECEIVE) {
-	self->_receiveNotify.queue();
+    if (events & STM32L0_USBD_CDC_EVENT_RECEIVE) {
+	self->_receiveCallback.queue();
     }
 }
 
@@ -417,8 +421,8 @@ void CDC::_doneCallback(class CDC *self)
 		    self->_tx_size2 = 0;
 		    self->_tx_data2 = NULL;
 		    
-                    self->_completionNotify.queue();
-		    self->_completionNotify = Notifier();
+                    self->_completionCallback.queue();
+		    self->_completionCallback = Callback();
 		}
 	    }
 	} else {
@@ -431,8 +435,8 @@ void CDC::_doneCallback(class CDC *self)
 		    self->_tx_size2 = 0;
 		    self->_tx_data2 = NULL;
 		    
-                    self->_completionNotify.queue();
-		    self->_completionNotify = Notifier();
+                    self->_completionCallback.queue();
+		    self->_completionCallback = Callback();
 		}
 	    }
 	}
@@ -440,8 +444,8 @@ void CDC::_doneCallback(class CDC *self)
 	self->_tx_size2 = 0;
 	self->_tx_data2 = NULL;
 	
-	self->_completionNotify.queue();
-	self->_completionNotify = Notifier();
+	self->_completionCallback.queue();
+	self->_completionCallback = Callback();
     }
 }
 

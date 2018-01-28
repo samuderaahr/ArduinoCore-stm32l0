@@ -34,6 +34,34 @@ GNSSLocation::GNSSLocation(const gnss_location_t *location)
     _location = *location;
 }
 
+GNSSLocation::GNSSLocation()
+{
+    _location.time.year    = 1980 - 1980;
+    _location.time.month   = 1;
+    _location.time.day     = 6;
+    _location.time.hours   = 0;
+    _location.time.minutes = 0;
+    _location.time.seconds = 0;
+    _location.time.millis  = 0;
+    _location.mask         = 0;
+    _location.correction   = 0;
+    _location.type         = 0;
+    _location.latitude     = 0;
+    _location.longitude    = 0;
+    _location.altitude     = 0;
+    _location.separation   = 0;
+    _location.speed        = 0;
+    _location.course       = 0;
+    _location.climb        = 0;
+    _location.ehpe         = 0;
+    _location.evpe         = 0;
+    _location.quality      = 0;
+    _location.numsv        = 0;
+    _location.pdop         = 9999;
+    _location.hdop         = 9999;
+    _location.vdop         = 9999;
+}
+
 GNSSLocation::operator bool() const
 {
     return (_location.type != GNSS_LOCATION_TYPE_NONE);
@@ -69,19 +97,19 @@ uint8_t GNSSLocation::day(void) const
     return _location.time.day;
 }
 
-uint8_t GNSSLocation::hour(void) const
+uint8_t GNSSLocation::hours(void) const
 {
-    return _location.time.hour;
+    return _location.time.hours;
 }
 
-uint8_t GNSSLocation::minute(void) const
+uint8_t GNSSLocation::minutes(void) const
 {
-    return _location.time.minute;
+    return _location.time.minutes;
 }
 
-uint8_t GNSSLocation::second(void) const
+uint8_t GNSSLocation::seconds(void) const
 {
-    return _location.time.second;
+    return _location.time.seconds;
 }
 
 uint16_t GNSSLocation::millis(void) const
@@ -89,7 +117,7 @@ uint16_t GNSSLocation::millis(void) const
     return _location.time.millis;
 }
 
-uint8_t GNSSLocation::correction(void) const
+uint8_t GNSSLocation::leapSeconds(void) const
 {
     return _location.correction;
 }
@@ -102,6 +130,11 @@ double GNSSLocation::latitude(void) const
 double GNSSLocation::longitude(void) const
 {
     return (double)_location.longitude / (double)1e7;
+}
+
+float GNSSLocation::height(void) const
+{
+    return (float)(_location.altitude + _location.separation) / (float)1e3;
 }
 
 float GNSSLocation::altitude(void) const
@@ -157,6 +190,11 @@ float GNSSLocation::vdop(void) const
 GNSSSatellites::GNSSSatellites(const gnss_satellites_t *satellites)
 {
     _satellites = *satellites;
+}
+
+GNSSSatellites::GNSSSatellites()
+{
+    _satellites.count = 0;
 }
 
 unsigned int GNSSSatellites::count() const
@@ -277,26 +315,45 @@ GNSSClass::GNSSClass()
 {
 }
 
-void GNSSClass::begin(Uart &uart, GNSSprotocol protocol, GNSSrate rate)
+void GNSSClass::begin(Uart &uart, GNSSmode mode, GNSSrate rate)
 {
+    static const gnss_callbacks_t GNSSCallbacks = {
+#if defined(STM32L0_CONFIG_PIN_GNSS_ENABLE)
+	(gnss_enable_callback_t)&GNSSClass::enableCallback,
+	(gnss_disable_callback_t)&GNSSClass::disableCallback,
+#else /* defined(STM32L0_CONFIG_PIN_GNSS_ENABLE) */
+	NULL,
+	NULL,
+#endif /* defined(STM32L0_CONFIG_PIN_GNSS_ENABLE) */
+	(gnss_location_callback_t)&GNSSClass::locationCallback,
+	(gnss_satellites_callback_t)&GNSSClass::satellitesCallback,
+    };
+
     _uart = &uart; 
 
     _uart->begin(9600);
 
-    if (protocol == PROTOCOL_NMEA)
+#if defined(STM32L0_CONFIG_PIN_GNSS_ENABLE)
+    stm32l0_gpio_pin_configure(STM32L0_CONFIG_PIN_GNSS_ENABLE, (STM32L0_GPIO_PARK_NONE | STM32L0_GPIO_PUPD_PULLDOWN | STM32L0_GPIO_OSPEED_LOW | STM32L0_GPIO_OTYPE_PUSHPULL | STM32L0_GPIO_MODE_OUTPUT));
+    stm32l0_gpio_pin_write(STM32L0_CONFIG_PIN_GNSS_ENABLE, 1);
+
+    armv6m_core_udelay(125000);
+#endif /* defined(STM32L0_CONFIG_PIN_GNSS_ENABLE) */
+
+    if (mode == MODE_NMEA)
     {
 	_baudrate = 9600;
 
-	gnss_initialize(protocol, rate, _baudrate, (gnss_send_routine_t)&GNSSClass::sendRoutine, (gnss_location_callback_t)&GNSSClass::locationCallback, (gnss_satellites_callback_t)&GNSSClass::satellitesCallback, (void*)this);
+	gnss_initialize(mode, rate, _baudrate, (gnss_send_routine_t)&GNSSClass::sendRoutine, &GNSSCallbacks, (void*)this);
     }
     else
     {
         _baudrate = (rate > RATE_1HZ) ? 115200 : 38400;
 
-	gnss_initialize(protocol, rate, _baudrate, (gnss_send_routine_t)&GNSSClass::sendRoutine, (gnss_location_callback_t)&GNSSClass::locationCallback, (gnss_satellites_callback_t)&GNSSClass::satellitesCallback, (void*)this);
+	gnss_initialize(mode, rate, _baudrate, (gnss_send_routine_t)&GNSSClass::sendRoutine, &GNSSCallbacks, (void*)this);
     }
 
-    _uart->onReceive(Notifier(&GNSSClass::receiveCallback, this));
+    _uart->onReceive(Callback(&GNSSClass::receiveCallback, this));
 }
 
 void GNSSClass::end()
@@ -312,6 +369,11 @@ void GNSSClass::end()
 bool GNSSClass::setAntenna(GNSSantenna antenna)
 {
     return (_uart && gnss_set_antenna(antenna));
+}
+
+bool GNSSClass::setPPS(unsigned int width)
+{
+    return (_uart && gnss_set_pps(width));
 }
 
 bool GNSSClass::setConstellation(GNSSconstellation constellation)
@@ -332,6 +394,11 @@ bool GNSSClass::setQZSS(bool enable)
 bool GNSSClass::setAutonomous(bool enable)
 {
     return (_uart && gnss_set_autonomous(enable));
+}
+
+bool GNSSClass::setPlatform(GNSSplatform platform)
+{
+    return (_uart && gnss_set_platform(platform));
 }
 
 bool GNSSClass::setPeriodic(unsigned int onTime, unsigned int period, bool force)
@@ -355,90 +422,59 @@ bool GNSSClass::busy()
 }
 
 
-int GNSSClass::available(void)
+bool GNSSClass::location(GNSSLocation &location)
 {
-    return !!_location_pending;
-}
-
-GNSSLocation GNSSClass::location(void)
-{
-    gnss_location_t location;
+    if (!_location_pending) {
+	return false;
+    }
 
     do
     {
 	_location_pending = false;
 	
-	location = _location_data;
+	location = GNSSLocation(&_location_data);
     }
     while (_location_pending);
     
-    return GNSSLocation(&location);
+    return true;
 }
 
-GNSSSatellites GNSSClass::satellites(void)
+bool GNSSClass::satellites(GNSSSatellites &satellites)
 {
-    gnss_satellites_t satellites;
+    if (!_satellites_pending) {
+	return false;
+    }
 
     do
     {
 	_satellites_pending = false;
 	
-	satellites = _satellites_data;
+	satellites = GNSSSatellites(&_satellites_data);
     }
     while (_satellites_pending);
     
-    return GNSSSatellites(&satellites);
+    return true;
 }
 
-#if 0
-void GNSSClass::onReceive(void(*callback)(void))
+void GNSSClass::onLocation(void(*callback)(void))
 {
-    _receiveCallback = callback;
+    _locationCallback = Callback(callback);
 }
-#endif
 
-void GNSSClass::onReceive(void(*callback)(void))
+void GNSSClass::onLocation(Callback callback)
 {
-    _receiveNotifier = Notifier(callback);
+    _locationCallback = callback;
 }
 
-void GNSSClass::onReceive(Notifier notifier)
+void GNSSClass::onSatellites(void(*callback)(void))
 {
-    _receiveNotifier = notifier;
+    _satellitesCallback = Callback(callback);
 }
 
-#if 0
-void GNSSClass::receiveCallback(void)
+void GNSSClass::onSatellites(Callback callback)
 {
-    class GNSSClass *self = &GNSS;
-    uint8_t rx_data[16];
-    int rx_count;
-
-    do
-    {
-	rx_count = self->_uart->read(&rx_data[0], sizeof(rx_data));
-	
-	if (rx_count > 0)
-	{
-	    gnss_receive(&rx_data[0], rx_count);
-	}
-    }
-    while (rx_count > 0);
+    _satellitesCallback = callback;
 }
-
-void GNSSClass::completionCallback(void)
-{
-    class GNSSClass *self = &GNSS;
-
-    if (self->_doneCallback) {
-	(*self->_doneCallback)();
-    } else {
-	self->_uart->begin(self->_baudrate);
-	self->_uart->setWakeup((self->_baudrate <= 38400));
-    }
-}
-
-#endif
 
 void GNSSClass::receiveCallback(void)
 {
@@ -472,11 +508,27 @@ void GNSSClass::sendRoutine(class GNSSClass *self, const uint8_t *data, uint32_t
     if (self->_uart)
     {
 	self->_doneCallback = callback;
-#if 0
-	self->_uart->write(data, count, (void(*)(void))&GNSSClass::completionCallback);
-#endif
-	self->_uart->write(data, count, Notifier(&GNSSClass::completionCallback, self));
+	self->_uart->write(data, count, Callback(&GNSSClass::completionCallback, self));
     }
+}
+
+void GNSSClass::enableCallback(class GNSSClass *self)
+{
+#if defined(STM32L0_CONFIG_PIN_GNSS_ENABLE)
+    self->_uart->begin(self->_baudrate);
+
+    stm32l0_gpio_pin_configure(STM32L0_CONFIG_PIN_GNSS_ENABLE, (STM32L0_GPIO_PARK_NONE | STM32L0_GPIO_PUPD_PULLDOWN | STM32L0_GPIO_OSPEED_LOW | STM32L0_GPIO_OTYPE_PUSHPULL | STM32L0_GPIO_MODE_OUTPUT));
+    stm32l0_gpio_pin_write(STM32L0_CONFIG_PIN_GNSS_ENABLE, 1);
+#endif /* defined(STM32L0_CONFIG_PIN_GNSS_ENABLE) */
+}
+
+void GNSSClass::disableCallback(class GNSSClass *self)
+{
+#if defined(STM32L0_CONFIG_PIN_GNSS_ENABLE)
+    stm32l0_gpio_pin_configure(STM32L0_CONFIG_PIN_GNSS_ENABLE, (STM32L0_GPIO_PARK_NONE | STM32L0_GPIO_MODE_ANALOG));
+    
+    self->_uart->end();
+#endif /* defined(STM32L0_CONFIG_PIN_GNSS_ENABLE) */
 }
 
 void GNSSClass::locationCallback(class GNSSClass *self, const gnss_location_t *location)
@@ -484,21 +536,15 @@ void GNSSClass::locationCallback(class GNSSClass *self, const gnss_location_t *l
     self->_location_data = *location;
     self->_location_pending = true;
 
-#if 0
-    if (self->_receiveCallback) {
-	(*self->_receiveCallback)();
-    } else {
-	stm32l0_system_wakeup();
-    }
-#endif
-
-    self->_receiveNotifier.queue();
+    self->_locationCallback.queue();
 }
 
 void GNSSClass::satellitesCallback(class GNSSClass *self, const gnss_satellites_t *satellites)
 {
     self->_satellites_data = *satellites;
     self->_satellites_pending = true;
+
+    self->_satellitesCallback.queue();
 }
 
 GNSSClass GNSS;

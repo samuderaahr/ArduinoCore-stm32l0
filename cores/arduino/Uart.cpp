@@ -32,7 +32,7 @@
 
 #define UART_TX_PACKET_SIZE 16
 
-Uart::Uart(struct _stm32l0_uart_t *uart, const struct _stm32l0_uart_params_t *params)
+Uart::Uart(struct _stm32l0_uart_t *uart, const struct _stm32l0_uart_params_t *params, void (*serialEventRun)(void))
 {
     _uart = uart;
 
@@ -48,7 +48,11 @@ Uart::Uart(struct _stm32l0_uart_t *uart, const struct _stm32l0_uart_params_t *pa
 
     _tx_data2 = NULL;
     _tx_size2 = 0;
-  
+
+    if (serialEventRun) {
+	g_serialEventRun = serialEventRun;
+    }
+
     stm32l0_uart_create(uart, params);
 }
 
@@ -71,7 +75,7 @@ void Uart::begin(unsigned long baudrate, uint16_t config, uint8_t *buffer, size_
 {
     uint32_t option;
 
-    if (((_uart->pins.rx & GPIO_PIN_IO_MASK) == GPIO_PIN_PA13) || ((_uart->pins.tx & GPIO_PIN_IO_MASK) == GPIO_PIN_PA14)) {
+    if (((_uart->pins.rx & STM32L0_GPIO_PIN_IO_MASK) == STM32L0_GPIO_PIN_PA13) || ((_uart->pins.tx & STM32L0_GPIO_PIN_IO_MASK) == STM32L0_GPIO_PIN_PA14)) {
 	if (g_swdStatus != 3) {
 	    stm32l0_system_swd_disable();
 
@@ -84,7 +88,7 @@ void Uart::begin(unsigned long baudrate, uint16_t config, uint8_t *buffer, size_
 	stm32l0_uart_disable(_uart);
     }
 
-    option = (_option & (UART_OPTION_RTS | UART_OPTION_CTS | UART_OPTION_XONOFF | UART_OPTION_WAKEUP)) | config;
+    option = (_option & (STM32L0_UART_OPTION_RTS | STM32L0_UART_OPTION_CTS | STM32L0_UART_OPTION_XONOFF | STM32L0_UART_OPTION_WAKEUP)) | config;
 
     _enabled = stm32l0_uart_enable(_uart, buffer, size, baudrate, option, (stm32l0_uart_event_callback_t)Uart::_eventCallback, (void*)this);
 
@@ -98,9 +102,11 @@ void Uart::begin(unsigned long baudrate, uint16_t config, uint8_t *buffer, size_
 void Uart::end()
 {
     if (_enabled) {
-      flush();
+	flush();
 
-      stm32l0_uart_disable(_uart);
+	stm32l0_uart_disable(_uart);
+
+	_enabled = false;
     }
 }
 
@@ -278,10 +284,10 @@ size_t Uart::write(const uint8_t *buffer, size_t size)
 
 bool Uart::write(const uint8_t *buffer, size_t size, void(*callback)(void))
 {
-    return write(buffer, size, Notifier(callback));
+    return write(buffer, size, Callback(callback));
 }
 
-bool Uart::write(const uint8_t *buffer, size_t size, Notifier notify)
+bool Uart::write(const uint8_t *buffer, size_t size, Callback callback)
 {
     if (!_enabled) {
 	return false;
@@ -295,7 +301,7 @@ bool Uart::write(const uint8_t *buffer, size_t size, Notifier notify)
 	return false;
     }
 
-    _completionNotify = notify;
+    _completionCallback = callback;
 
     _tx_data2 = buffer;
     _tx_size2 = size;
@@ -306,7 +312,7 @@ bool Uart::write(const uint8_t *buffer, size_t size, Notifier notify)
 	if (!stm32l0_uart_transmit(_uart, _tx_data2, _tx_size2, (stm32l0_uart_done_callback_t)Uart::_doneCallback, (void*)this)) {
 	    _tx_busy = false;
 
-	    _completionNotify = Notifier();
+	    _completionCallback = Callback();
 
 	    _tx_data2 = NULL;
 	    _tx_size2 = 0;
@@ -335,34 +341,34 @@ void Uart::setNonBlocking(bool enable)
 
 void Uart::setWakeup(bool enable)
 {
-    _option = (_option & ~UART_OPTION_WAKEUP) | (enable ? UART_OPTION_WAKEUP : 0);
+    _option = (_option & ~STM32L0_UART_OPTION_WAKEUP) | (enable ? STM32L0_UART_OPTION_WAKEUP : 0);
 
     stm32l0_uart_configure(_uart, _baudrate, _option);
 }
 
 void Uart::setFlowControl(enum FlowControl mode)
 {
-    _option = ((_option & ~(UART_OPTION_RTS | UART_OPTION_CTS | UART_OPTION_XONOFF)) |
-	       ((mode == 3) ? (UART_OPTION_RTS | UART_OPTION_CTS)
-		: ((mode == 4) ? (UART_OPTION_XONOFF) : 0)));
+    _option = ((_option & ~(STM32L0_UART_OPTION_RTS | STM32L0_UART_OPTION_CTS | STM32L0_UART_OPTION_XONOFF)) |
+	       ((mode == 3) ? (STM32L0_UART_OPTION_RTS | STM32L0_UART_OPTION_CTS)
+		: ((mode == 4) ? (STM32L0_UART_OPTION_XONOFF) : 0)));
 
     stm32l0_uart_configure(_uart, _baudrate, _option);
 }
 
 void Uart::onReceive(void(*callback)(void))
 {
-    _receiveNotify = Notifier(callback);
+    _receiveCallback = Callback(callback);
 }
 
-void Uart::onReceive(Notifier notify)
+void Uart::onReceive(Callback callback)
 {
-    _receiveNotify = notify;
+    _receiveCallback = callback;
 }
 
 void Uart::_eventCallback(class Uart *self, uint32_t events)
 {
-    if (events & UART_EVENT_RECEIVE) {
-	self->_receiveNotify.queue();
+    if (events & STM32L0_UART_EVENT_RECEIVE) {
+	self->_receiveCallback.queue();
     }
 }
 
@@ -407,8 +413,8 @@ void Uart::_doneCallback(class Uart *self)
 		    self->_tx_size2 = 0;
 		    self->_tx_data2 = NULL;
 
-                    self->_completionNotify.queue();
-		    self->_completionNotify = Notifier();
+                    self->_completionCallback.queue();
+		    self->_completionCallback = Callback();
 		}
 	    }
 	} else {
@@ -421,8 +427,8 @@ void Uart::_doneCallback(class Uart *self)
 		    self->_tx_size2 = 0;
 		    self->_tx_data2 = NULL;
 
-                    self->_completionNotify.queue();
-		    self->_completionNotify = Notifier();
+                    self->_completionCallback.queue();
+		    self->_completionCallback = Callback();
 		}
 	    }
 	}
@@ -430,7 +436,7 @@ void Uart::_doneCallback(class Uart *self)
 	self->_tx_size2 = 0;
 	self->_tx_data2 = NULL;
 
-	self->_completionNotify.queue();
-	self->_completionNotify = Notifier();
+	self->_completionCallback.queue();
+	self->_completionCallback = Callback();
     }
 }

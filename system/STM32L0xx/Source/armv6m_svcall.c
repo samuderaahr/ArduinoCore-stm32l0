@@ -28,6 +28,8 @@
 
 #include "armv6m.h"
 
+extern void SVC_Handler(void);
+
 void armv6m_svcall_initialize(void)
 {
     NVIC_SetPriority(SVC_IRQn, ((1 << __NVIC_PRIO_BITS) -1));
@@ -37,11 +39,13 @@ void __attribute__((naked)) SVC_Handler(void)
 {
     __asm__(
         "  mov     r2, sp                              \n"
+	"  push    { r2, lr }                          \n"
         "  ldmia   r2, { r0, r1, r2, r3 }              \n"
         "  blx     r12                                 \n"
-        "  str     r0, [sp, #0]                        \n"
-        "  ldr     r0, =0xfffffff9                     \n"
-        "  bx      r0                                  \n"
+	"  pop     { r2, r3 }                          \n"
+	"  mov     lr, r3                              \n"
+        "  str     r0, [r2, #0]                        \n"
+        "  bx      lr                                  \n"
 	:
 	:
 	);

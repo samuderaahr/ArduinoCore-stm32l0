@@ -31,6 +31,8 @@
 #include "stm32l0_rtc.h"
 #include "stm32l0_system.h"
 
+extern void RTC_IRQHandler(void);
+
 typedef struct _stm32l0_rtc_device_t {
     stm32l0_rtc_callback_t  alarm_callback;
     void                    *alarm_context;
@@ -178,12 +180,12 @@ void stm32l0_rtc_set_calendar(unsigned int mask, const stm32l0_rtc_calendar_t *c
     stm32l0_rtc_get_calendar(&before);
 
     after.subseconds = before.subseconds;
-    after.seconds    = (mask & RTC_CALENDAR_MASK_SECONDS) ? calendar->seconds : before.seconds;
-    after.minutes    = (mask & RTC_CALENDAR_MASK_MINUTES) ? calendar->minutes : before.minutes;
-    after.hours      = (mask & RTC_CALENDAR_MASK_HOURS)   ? calendar->hours   : before.hours;
-    after.day        = (mask & RTC_CALENDAR_MASK_DAY)     ? calendar->day     : before.day;
-    after.month      = (mask & RTC_CALENDAR_MASK_MONTH)   ? calendar->month   : before.month;
-    after.year       = (mask & RTC_CALENDAR_MASK_YEAR)    ? calendar->year    : before.year;
+    after.seconds    = (mask & STM32L0_RTC_CALENDAR_MASK_SECONDS) ? calendar->seconds : before.seconds;
+    after.minutes    = (mask & STM32L0_RTC_CALENDAR_MASK_MINUTES) ? calendar->minutes : before.minutes;
+    after.hours      = (mask & STM32L0_RTC_CALENDAR_MASK_HOURS)   ? calendar->hours   : before.hours;
+    after.day        = (mask & STM32L0_RTC_CALENDAR_MASK_DAY)     ? calendar->day     : before.day;
+    after.month      = (mask & STM32L0_RTC_CALENDAR_MASK_MONTH)   ? calendar->month   : before.month;
+    after.year       = (mask & STM32L0_RTC_CALENDAR_MASK_YEAR)    ? calendar->year    : before.year;
 
     RTC->TR = ((stm32l0_rtc_int_to_bcd[after.seconds] << RTC_TR_SU_Pos) |
 	       (stm32l0_rtc_int_to_bcd[after.minutes] << RTC_TR_MNU_Pos) |
@@ -305,7 +307,7 @@ void stm32l0_rtc_alarm_attach(unsigned int match, const stm32l0_rtc_alarm_t *ala
 
     n_alrmr = 0;
     
-    if (match & RTC_ALARM_MATCH_SECONDS) 
+    if (match & STM32L0_RTC_ALARM_MATCH_SECONDS) 
     {
 	n_alrmr |= (stm32l0_rtc_int_to_bcd[alarm->seconds] << RTC_ALRMAR_SU_Pos);
     }
@@ -314,7 +316,7 @@ void stm32l0_rtc_alarm_attach(unsigned int match, const stm32l0_rtc_alarm_t *ala
 	n_alrmr |= RTC_ALRMAR_MSK1;
     }
     
-    if (match & RTC_ALARM_MATCH_MINUTES) 
+    if (match & STM32L0_RTC_ALARM_MATCH_MINUTES) 
     {
 	n_alrmr |= (stm32l0_rtc_int_to_bcd[alarm->minutes] << RTC_ALRMAR_MNU_Pos);
     }
@@ -323,7 +325,7 @@ void stm32l0_rtc_alarm_attach(unsigned int match, const stm32l0_rtc_alarm_t *ala
 	n_alrmr |= RTC_ALRMAR_MSK2;
     }
     
-    if (match & RTC_ALARM_MATCH_HOURS) 
+    if (match & STM32L0_RTC_ALARM_MATCH_HOURS) 
     {
 	n_alrmr |= (stm32l0_rtc_int_to_bcd[alarm->hours] << RTC_ALRMAR_HU_Pos);
     }
@@ -332,7 +334,7 @@ void stm32l0_rtc_alarm_attach(unsigned int match, const stm32l0_rtc_alarm_t *ala
 	n_alrmr |= RTC_ALRMAR_MSK3;
     }
     
-    if (match & RTC_ALARM_MATCH_DAY) 
+    if (match & STM32L0_RTC_ALARM_MATCH_DAY) 
     {
 	n_alrmr |= (stm32l0_rtc_int_to_bcd[alarm->day] << RTC_ALRMAR_DU_Pos);
     }
@@ -439,7 +441,7 @@ static void stm32l0_rtc_timer_routine(void)
     uint32_t seconds;
     uint16_t subseconds;
     stm32l0_rtc_timer_t *timer;
-    stm32l0_rtc_callback_t callback;
+    stm32l0_rtc_timer_callback_t callback;
 
     seconds = stm32l0_rtc_device.timer_seconds;
     subseconds = stm32l0_rtc_device.timer_subseconds;
@@ -495,7 +497,7 @@ static void stm32l0_rtc_timer_routine(void)
 	
 	if ((uint32_t)callback & 1)
 	{
-	    (*callback)(timer->context);
+	    (*callback)(timer->context, NULL);
 	}
     }
 
@@ -635,7 +637,7 @@ static void stm32l0_rtc_timer_insert(stm32l0_rtc_timer_t *timer, uint32_t second
 
     timer->seconds = seconds;
     timer->subseconds = subseconds;
-    timer->callback = (stm32l0_rtc_callback_t)((uint32_t)timer->callback | 1);
+    timer->callback = (stm32l0_rtc_timer_callback_t)((uint32_t)timer->callback | 1);
 
     timer->next->previous = timer;
     timer->previous->next = timer;
@@ -711,6 +713,17 @@ static void stm32l0_rtc_timer_remove(stm32l0_rtc_timer_t *timer)
     }
 }
 
+static void stm32l0_rtc_timer_release(stm32l0_rtc_timer_t *timer)
+{
+    stm32l0_rtc_timer_callback_t callback;
+
+    stm32l0_rtc_timer_remove(timer);
+
+    callback = (stm32l0_rtc_timer_callback_t)((uint32_t)timer->callback | 1);
+
+    (*callback)(timer->context, timer);
+}
+
 void stm32l0_rtc_timer_reference(uint32_t *p_seconds, uint16_t *p_subseconds)
 {
     stm32l0_rtc_calendar_t calendar;
@@ -719,7 +732,7 @@ void stm32l0_rtc_timer_reference(uint32_t *p_seconds, uint16_t *p_subseconds)
     stm32l0_rtc_calendar_subtract(&calendar, &stm32l0_rtc_device.timer_reference, (int32_t*)p_seconds, p_subseconds);
 }
 
-void stm32l0_rtc_timer_create(stm32l0_rtc_timer_t *timer, stm32l0_rtc_callback_t callback, void *context)
+void stm32l0_rtc_timer_create(stm32l0_rtc_timer_t *timer, stm32l0_rtc_timer_callback_t callback, void *context)
 {
     timer->next = NULL;
     timer->previous = NULL;
@@ -729,8 +742,20 @@ void stm32l0_rtc_timer_create(stm32l0_rtc_timer_t *timer, stm32l0_rtc_callback_t
     timer->subseconds = 0;
 }
 
-void stm32l0_rtc_timer_destroy(stm32l0_rtc_timer_t *timer)
+bool stm32l0_rtc_timer_destroy(stm32l0_rtc_timer_t *timer)
 {
+    bool success = true;
+
+    if (__get_IPSR() == 0)
+    {
+	armv6m_svcall_1((uint32_t)&stm32l0_rtc_timer_release, (uint32_t)timer);
+    }
+    else
+    {
+	success = armv6m_pendsv_enqueue((armv6m_pendsv_routine_t)stm32l0_rtc_timer_release, (void*)timer, 0);
+    }
+
+    return success;
 }
 
 bool stm32l0_rtc_timer_start(stm32l0_rtc_timer_t *timer, uint32_t seconds, uint16_t subseconds, bool absolute)
